@@ -1149,7 +1149,7 @@ Activities that are not automatically detected include disk or CPU activity and 
 
 C#のソースファイルをコンパイルするには[.NET Framework 4.0][]が必要です。
 Windows10以上であれば標準でインストールされています。
-VisualStdioは無くてもコンパイル可能です。
+VisualStudioは無くてもコンパイル可能です。
 
 コンパイル用のバッチファイルを[リポジトリ](#リポジトリを公開しています)にて公開しています。
 
