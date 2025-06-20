@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Threading;
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 using System.Windows.Forms;
 
 
@@ -42,6 +43,15 @@ public class TrayApp : Form
         // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setthreadexecutionstate
         [DllImport("kernel32.dll", SetLastError = false)]
         public static extern EXECUTION_STATE SetThreadExecutionState(EXECUTION_STATE esFlags);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = false)]
+        public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+        [DllImport("user32.dll", SetLastError = false)]
+        public static extern int GetWindowThreadProcessId(IntPtr hWnd, out int lpdwProcessId);
+
+        [DllImport("user32.dll", SetLastError = false)]
+        public static extern int SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
     }
 
 
@@ -191,6 +201,33 @@ public class TrayApp : Form
             if (createdNew)
             {
                 Application.Run(new TrayApp());
+            }else{
+                // 既に起動している場合は、起動している既存のトレイアイコンをクリックします
+                // これによりメッセージボックスが表示されます
+                // 既存のトレイアイコンをクリックするためのメッセージを送信します
+                const int WM_LBUTTONDOWN = 0x0201;
+                const int WM_LBUTTONUP = 0x0202;
+                IntPtr handle = NativeMethods.FindWindow(null, MutexObjectName);
+                if (handle != IntPtr.Zero)
+                {
+                    // マウスの左ボタンを押すメッセージを送信します
+                    NativeMethods.SendMessage(handle, WM_LBUTTONDOWN, IntPtr.Zero, IntPtr.Zero);
+                    // マウスの左ボタンを離すメッセージを送信します
+                    NativeMethods.SendMessage(handle, WM_LBUTTONUP, IntPtr.Zero, IntPtr.Zero);
+                }else{
+                    // 既存のトレイアイコンが見つからない場合は、メッセージボックスを表示します
+                    if (!IsMessageBoxDisplayed)
+                    {
+                        IsMessageBoxDisplayed = true;
+                        MessageBox.Show(
+                            "既にスクリーンセーバー抑止アプリケーションが起動しています。",
+                            MutexObjectName,
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information
+                        );
+                        IsMessageBoxDisplayed = false;
+                    }
+                }
             }
         }
     }
