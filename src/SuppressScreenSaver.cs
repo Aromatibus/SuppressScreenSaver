@@ -48,9 +48,6 @@ public class TrayApp : Form
         public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
 
         [DllImport("user32.dll", SetLastError = false)]
-        public static extern int GetWindowThreadProcessId(IntPtr hWnd, out int lpdwProcessId);
-
-        [DllImport("user32.dll", SetLastError = false)]
         public static extern int SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
     }
 
@@ -207,13 +204,13 @@ public class TrayApp : Form
                 // 既存のトレイアイコンをクリックするためのメッセージを送信します
                 const int WM_LBUTTONDOWN = 0x0201;
                 const int WM_LBUTTONUP = 0x0202;
-                IntPtr handle = NativeMethods.FindWindow(null, MutexObjectName);
-                if (handle != IntPtr.Zero)
+                IntPtr hWnd = NativeMethods.FindWindow(null, MutexObjectName);
+                if (hWnd != IntPtr.Zero)
                 {
                     // マウスの左ボタンを押すメッセージを送信します
-                    NativeMethods.SendMessage(handle, WM_LBUTTONDOWN, IntPtr.Zero, IntPtr.Zero);
+                    NativeMethods.SendMessage(hWnd, WM_LBUTTONDOWN, IntPtr.Zero, IntPtr.Zero);
                     // マウスの左ボタンを離すメッセージを送信します
-                    NativeMethods.SendMessage(handle, WM_LBUTTONUP, IntPtr.Zero, IntPtr.Zero);
+                    NativeMethods.SendMessage(hWnd, WM_LBUTTONUP, IntPtr.Zero, IntPtr.Zero);
                 }else{
                     // 既存のトレイアイコンが見つからない場合は、メッセージボックスを表示します
                     if (!IsMessageBoxDisplayed)
