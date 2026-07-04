@@ -1,0 +1,3 @@
+// アイコンリソースの定義
+// ID 1 にアイコンファイルを割り当てます
+1 ICON "images/SuppressScreenSaver.ico"
