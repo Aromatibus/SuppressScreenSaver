@@ -18,6 +18,9 @@ pub const CORNER_THRESHOLD_PX: i32 = 10;
 // 四隅に留まってから画面OFFにするまでの時間 (ミリ秒)
 pub const CORNER_TIMEOUT_MS: u64 = 3000;
 
+// 無操作状態で画面OFFにするまでの時間 (ミリ秒)
+pub const IDLE_TIMEOUT_MS: u64 = 60000;
+
 // 画面OFFから復帰するために必要なマウス移動距離 (px)
 pub const WAKE_THRESHOLD_PX: i32 = 5;
 

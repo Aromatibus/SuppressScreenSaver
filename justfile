@@ -1,4 +1,4 @@
-# Windows 用　常駐型スクリーンセイバー抑制プログラム
+# Windows専用、常駐型スクリーンセイバー抑制プログラム
 
 # PowerShell をデフォルトシェルに設定して 'sh' 不足のエラーを回避します
 set shell := ["powershell.exe", "-NoProfile", "-Command"]

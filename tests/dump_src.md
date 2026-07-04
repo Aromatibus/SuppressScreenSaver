@@ -22,8 +22,12 @@ pub const MUTEX_NAME: &str = "SuppressScreenSaverMutex";
 // ウィンドウメッセージID（カスタム）
 pub const WM_TRAY_ICON: u32 = 0x0400 + 1; // WM_USER + 1
 
-// アイコンのリソースID (resource.rc で定義したもの)
+// アイコンのリソースID
 pub const ICON_ID: u16 = 1;
+pub const TRAY_ID: u32 = 1;
+
+// コンテキストメニュー用ID
+pub const IDM_EXIT: usize = 1001;
 
 // 四隅の判定しきい値 (px)
 pub const CORNER_THRESHOLD_PX: i32 = 10;
@@ -64,35 +68,32 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 fn main() {
     unsafe {
-        // 二重起動防止用の Mutex 名を UTF-16 に変換
         let mutex_name: Vec<u16> = config::MUTEX_NAME.encode_utf16().chain(Some(0)).collect();
 
-        // Mutex を作成。成功・失敗に関わらずハンドルが返ります
         let _h_mutex = CreateMutexW(None, true, PCWSTR(mutex_name.as_ptr()))
             .expect("Failed to create mutex");
 
-        // GetLastError() の戻り値と定数の内部数値 (.0) を比較します
-        // これにより Result 型との誤認や型不一致エラーを確実に回避します
-        if windows::Win32::Foundation::GetLastError().0 == ERROR_ALREADY_EXISTS.0 {
-            let app_name_wide: Vec<u16> = config::APP_NAME.encode_utf16().chain(Some(0)).collect();
-            let hwnd = FindWindowW(None, PCWSTR(app_name_wide.as_ptr()));
+        // GetLastError() が Result 型を返すため、Err の中身を比較する
+        let last_err = windows::Win32::Foundation::GetLastError();
+        if let Err(e) = last_err {
+            if e.code() == ERROR_ALREADY_EXISTS.to_hresult() {
+                let app_name_wide: Vec<u16> = config::APP_NAME.encode_utf16().chain(Some(0)).collect();
+                let hwnd = FindWindowW(None, PCWSTR(app_name_wide.as_ptr()));
 
-            if hwnd.0 != 0 {
-                // 既存ウィンドウが見つかれば、クリックメッセージを送信して通知
-                let _ = SendMessageW(hwnd, WM_LBUTTONDOWN, WPARAM(0), LPARAM(0));
-                let _ = SendMessageW(hwnd, WM_LBUTTONUP, WPARAM(0), LPARAM(0));
+                if hwnd.0 != 0 {
+                    let _ = SendMessageW(hwnd, WM_LBUTTONDOWN, WPARAM(0), LPARAM(0));
+                    let _ = SendMessageW(hwnd, WM_LBUTTONUP, WPARAM(0), LPARAM(0));
+                }
+                return;
             }
-            return;
         }
 
-        // 抑止機能、トレイアイコン、マウス監視の初期化
         suppress::suppress_screensaver();
         let _tray = TrayManager::new();
         let mut monitor = MouseMonitor::new();
 
         let mut msg = MSG::default();
         loop {
-            // Windows メッセージキューの処理
             while PeekMessageW(&mut msg, HWND(0), 0, 0, PM_REMOVE).as_bool() {
                 if msg.message == WM_QUIT {
                     suppress::reset_suppression();
@@ -102,10 +103,7 @@ fn main() {
                 DispatchMessageW(&msg);
             }
 
-            // マウス座標の監視と画面制御の更新
             monitor.tick();
-
-            // CPU 負荷を抑えるため、メッセージが届くか指定時間経過するまで待機
             MsgWaitForMultipleObjects(None, false, config::MONITOR_INTERVAL_MS, QS_ALLINPUT);
         }
     }
@@ -128,7 +126,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 enum MonitorState {
     Idle,
     Counting(Instant),
-    ScreenOff(POINT),
+    // POINTはPartialEqを実装していないため、x, y座標を個別に保持する
+    ScreenOff(i32, i32),
 }
 
 pub struct MouseMonitor {
@@ -163,13 +162,13 @@ impl MouseMonitor {
                 if !self.is_in_corner(current_pos, sx, sy, sw, sh) {
                     self.state = MonitorState::Idle;
                 } else if start_time.elapsed() >= Duration::from_millis(config::CORNER_TIMEOUT_MS) {
-                    self.state = MonitorState::ScreenOff(current_pos);
+                    self.state = MonitorState::ScreenOff(current_pos.x, current_pos.y);
                     self.screen_manager.show();
                 }
             }
-            MonitorState::ScreenOff(saved_pos) => {
-                let dx = (current_pos.x - saved_pos.x).abs();
-                let dy = (current_pos.y - saved_pos.y).abs();
+            MonitorState::ScreenOff(saved_x, saved_y) => {
+                let dx = (current_pos.x - saved_x).abs();
+                let dy = (current_pos.y - saved_y).abs();
                 if dx > config::WAKE_THRESHOLD_PX || dy > config::WAKE_THRESHOLD_PX {
                     self.screen_manager.hide();
                     self.state = MonitorState::Idle;
@@ -229,7 +228,8 @@ impl BlackScreenManager {
             ..Default::default()
         };
 
-        RegisterClassW(&wnd_class);
+        // クラスが既に登録されている場合はエラーになるが、無視して進める
+        let _ = RegisterClassW(&wnd_class);
 
         let x = GetSystemMetrics(SM_XVIRTUALSCREEN);
         let y = GetSystemMetrics(SM_YVIRTUALSCREEN);
@@ -245,9 +245,7 @@ impl BlackScreenManager {
             None, None, instance, None,
         );
 
-        if hwnd.0 != 0 {
-            self.hwnd = Some(hwnd);
-        }
+        if hwnd.0 != 0 { self.hwnd = Some(hwnd); }
     }
 
     pub unsafe fn show(&mut self) {
@@ -268,9 +266,7 @@ impl BlackScreenManager {
 
 impl Drop for BlackScreenManager {
     fn drop(&mut self) {
-        if let Some(hwnd) = self.hwnd {
-            unsafe { let _ = DestroyWindow(hwnd); }
-        }
+        if let Some(hwnd) = self.hwnd { unsafe { let _ = DestroyWindow(hwnd); } }
     }
 }
 ```
@@ -320,8 +316,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WNDCLASSW, WS_OVERLAPPEDWINDOW, MF_STRING, AppendMenuW, IDI_APPLICATION, LoadIconW,
 };
 
-const IDM_EXIT: usize = 1001;
-
 pub struct TrayManager {
     pub hwnd: HWND,
 }
@@ -338,15 +332,11 @@ impl TrayManager {
             lpszClassName: class_name,
             ..Default::default()
         };
-
-        RegisterClassW(&wnd_class);
+        let _ = RegisterClassW(&wnd_class);
 
         let title: Vec<u16> = config::APP_NAME.encode_utf16().chain(Some(0)).collect();
         let hwnd = CreateWindowExW(
-            Default::default(),
-            class_name,
-            PCWSTR(title.as_ptr()),
-            WS_OVERLAPPEDWINDOW,
+            Default::default(), class_name, PCWSTR(title.as_ptr()), WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
             None, None, instance, None,
         );
@@ -364,10 +354,8 @@ impl TrayManager {
         let instance = windows::Win32::System::LibraryLoader::GetModuleHandleW(None)
             .expect("Failed to get module handle");
 
-        nid.hIcon = LoadIconW(
-            instance,
-            PCWSTR(config::ICON_ID as usize as *const u16),
-        ).unwrap_or_else(|_| LoadIconW(None, IDI_APPLICATION).unwrap());
+        nid.hIcon = LoadIconW(instance, PCWSTR(config::ICON_ID as usize as *const u16))
+            .unwrap_or_else(|_| LoadIconW(None, IDI_APPLICATION).unwrap());
 
         let tip_name: Vec<u16> = config::APP_NAME.encode_utf16().chain(Some(0)).collect();
         let len = tip_name.len().min(nid.szTip.len() - 1);
@@ -380,7 +368,7 @@ impl TrayManager {
         let mut nid = NOTIFYICONDATAW::default();
         nid.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
         nid.hWnd = self.hwnd;
-        nid.uID = 1;
+        nid.uID = config::TRAY_ID;
         nid
     }
 
@@ -397,18 +385,15 @@ impl TrayManager {
                 LRESULT(0)
             }
             WM_COMMAND => {
-                if wparam.0 == IDM_EXIT { let _ = DestroyWindow(hwnd); }
+                if wparam.0 == config::IDM_EXIT { let _ = DestroyWindow(hwnd); }
                 LRESULT(0)
             }
-            WM_LBUTTONDOWN => {
-                Self::show_info_message(hwnd);
-                LRESULT(0)
-            }
+            WM_LBUTTONDOWN => { Self::show_info_message(hwnd); LRESULT(0) }
             WM_DESTROY => {
                 let mut nid = NOTIFYICONDATAW::default();
                 nid.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
                 nid.hWnd = hwnd;
-                nid.uID = 1;
+                nid.uID = config::TRAY_ID;
                 Shell_NotifyIconW(NIM_DELETE, &nid);
                 PostQuitMessage(0);
                 LRESULT(0)
@@ -427,11 +412,11 @@ impl TrayManager {
 
     unsafe fn show_context_menu(hwnd: HWND) {
         if let Ok(h_menu) = CreatePopupMenu() {
-            let _ = AppendMenuW(h_menu, MF_STRING, IDM_EXIT, w!("アプリケーションを終了します"));
+            let _ = AppendMenuW(h_menu, MF_STRING, config::IDM_EXIT, w!("終了"));
             let mut pos = std::mem::zeroed();
             let _ = GetCursorPos(&mut pos);
             SetForegroundWindow(hwnd);
-            let _ = TrackPopupMenu(h_menu, TPM_LEFTALIGN | TPM_BOTTOMALIGN, pos.x, pos.y, 0, hwnd, None);
+            TrackPopupMenu(h_menu, TPM_LEFTALIGN | TPM_BOTTOMALIGN, pos.x, pos.y, 0, hwnd, None);
         }
     }
 }
